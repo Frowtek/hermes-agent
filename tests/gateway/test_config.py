@@ -57,6 +57,15 @@ class TestPlatformConfigRoundtrip:
         restored = PlatformConfig.from_dict({"enabled": "false"})
         assert restored.enabled is False
 
+    def test_from_dict_ignores_non_mapping_extra(self):
+        restored = PlatformConfig.from_dict({"enabled": True, "extra": "oops"})
+        config = GatewayConfig(
+            platforms={Platform.DINGTALK: restored},
+        )
+
+        assert restored.extra == {}
+        assert config.get_connected_platforms() == []
+
 
 class TestGetConnectedPlatforms:
     def test_returns_enabled_with_token(self):

@@ -1432,16 +1432,25 @@ def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = Fals
     if cwd is None:
         cwd = os.getcwd()
 
-    cwd_path = Path(cwd).resolve()
     sections = []
+    project_context = ""
 
-    # Priority-based project context: first match wins
-    project_context = (
-        _load_hermes_md(cwd_path)
-        or _load_agents_md(cwd_path)
-        or _load_claude_md(cwd_path)
-        or _load_cursorrules(cwd_path)
-    )
+    try:
+        cwd_path = Path(cwd).resolve()
+    except OSError as e:
+        logger.debug("Could not resolve context cwd %s: %s", cwd, e)
+    else:
+        # Priority-based project context: first match wins
+        try:
+            project_context = (
+                _load_hermes_md(cwd_path)
+                or _load_agents_md(cwd_path)
+                or _load_claude_md(cwd_path)
+                or _load_cursorrules(cwd_path)
+            )
+        except OSError as e:
+            logger.debug("Could not discover project context files for %s: %s", cwd_path, e)
+
     if project_context:
         sections.append(project_context)
 

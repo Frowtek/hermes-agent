@@ -4,6 +4,7 @@ import builtins
 import importlib
 import logging
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -688,6 +689,36 @@ class TestBuildContextFilesPrompt:
         (tmp_path / ".cursorrules").write_text("Use ESLint.")
         result = build_context_files_prompt(cwd=str(tmp_path))
         assert "ESLint" in result
+
+    def test_inaccessible_cwd_still_loads_soul_md(self, tmp_path, monkeypatch):
+        hermes_home = tmp_path / "hermes_home"
+        hermes_home.mkdir()
+        (hermes_home / "SOUL.md").write_text("Soul survives cwd failures.", encoding="utf-8")
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+        real_resolve = Path.resolve
+
+        def fake_resolve(path_obj, *args, **kwargs):
+            if str(path_obj) == str(tmp_path):
+                raise PermissionError("cwd blocked")
+            return real_resolve(path_obj, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", fake_resolve)
+
+        result = build_context_files_prompt(cwd=str(tmp_path))
+
+        assert "Soul survives cwd failures." in result
+        assert "Project Context" in result
+
+    def test_project_context_discovery_permission_error_is_ignored(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "agent.prompt_builder._load_hermes_md",
+            lambda cwd_path: (_ for _ in ()).throw(PermissionError("blocked")),
+        )
+
+        result = build_context_files_prompt(cwd=str(tmp_path), skip_soul=True)
+
+        assert result == ""
 
 
 # =========================================================================

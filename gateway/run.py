@@ -15110,9 +15110,18 @@ class GatewayRunner:
         return True
 
     def _clear_session_boundary_security_state(self, session_key: str) -> None:
-        """Clear per-session control state that must not survive a boundary switch."""
+        """Clear per-session state that must not survive a boundary switch."""
         if not session_key:
             return
+
+        session_model_overrides = getattr(self, "_session_model_overrides", None)
+        if isinstance(session_model_overrides, dict):
+            session_model_overrides.pop(session_key, None)
+        self._set_session_reasoning_override(session_key, None)
+
+        pending_model_notes = getattr(self, "_pending_model_notes", None)
+        if isinstance(pending_model_notes, dict):
+            pending_model_notes.pop(session_key, None)
 
         pending_skills_reload_notes = getattr(
             self, "_pending_skills_reload_notes", None

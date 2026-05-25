@@ -127,6 +127,18 @@ async def test_resume_clears_session_scoped_approval_and_yolo_state():
     runner, session_key = _make_resume_runner()
     other_key = "agent:main:telegram:dm:other-chat"
 
+    runner._session_model_overrides = {
+        session_key: {"model": "gpt-5.4", "provider": "openai"},
+        other_key: {"model": "claude-sonnet-4-6", "provider": "anthropic"},
+    }
+    runner._session_reasoning_overrides = {
+        session_key: {"enabled": True, "effort": "high"},
+        other_key: {"enabled": True, "effort": "low"},
+    }
+    runner._pending_model_notes = {
+        session_key: "[Note: switched to gpt-5.4.]",
+        other_key: "[Note: switched to claude-sonnet-4-6.]",
+    }
     runner._pending_skills_reload_notes = {
         session_key: "[USER INITIATED SKILLS RELOAD: target]",
         other_key: "[USER INITIATED SKILLS RELOAD: other]",
@@ -145,11 +157,17 @@ async def test_resume_clears_session_scoped_approval_and_yolo_state():
     assert "Resumed session" in result
     assert is_approved(session_key, "recursive delete") is False
     assert is_session_yolo_enabled(session_key) is False
+    assert session_key not in runner._session_model_overrides
+    assert session_key not in runner._session_reasoning_overrides
+    assert session_key not in runner._pending_model_notes
     assert session_key not in runner._pending_approvals
     assert session_key not in runner._update_prompt_pending
     assert session_key not in runner._pending_skills_reload_notes
     assert is_approved(other_key, "recursive delete") is True
     assert is_session_yolo_enabled(other_key) is True
+    assert other_key in runner._session_model_overrides
+    assert other_key in runner._session_reasoning_overrides
+    assert other_key in runner._pending_model_notes
     assert other_key in runner._pending_approvals
     assert other_key in runner._update_prompt_pending
     assert other_key in runner._pending_skills_reload_notes
@@ -160,6 +178,18 @@ async def test_branch_clears_session_scoped_approval_and_yolo_state():
     runner, session_key = _make_branch_runner()
     other_key = "agent:main:telegram:dm:other-chat"
 
+    runner._session_model_overrides = {
+        session_key: {"model": "gpt-5.4", "provider": "openai"},
+        other_key: {"model": "claude-sonnet-4-6", "provider": "anthropic"},
+    }
+    runner._session_reasoning_overrides = {
+        session_key: {"enabled": True, "effort": "high"},
+        other_key: {"enabled": True, "effort": "low"},
+    }
+    runner._pending_model_notes = {
+        session_key: "[Note: switched to gpt-5.4.]",
+        other_key: "[Note: switched to claude-sonnet-4-6.]",
+    }
     runner._pending_skills_reload_notes = {
         session_key: "[USER INITIATED SKILLS RELOAD: target]",
         other_key: "[USER INITIATED SKILLS RELOAD: other]",
@@ -178,11 +208,17 @@ async def test_branch_clears_session_scoped_approval_and_yolo_state():
     assert "Branched to" in result
     assert is_approved(session_key, "recursive delete") is False
     assert is_session_yolo_enabled(session_key) is False
+    assert session_key not in runner._session_model_overrides
+    assert session_key not in runner._session_reasoning_overrides
+    assert session_key not in runner._pending_model_notes
     assert session_key not in runner._pending_approvals
     assert session_key not in runner._update_prompt_pending
     assert session_key not in runner._pending_skills_reload_notes
     assert is_approved(other_key, "recursive delete") is True
     assert is_session_yolo_enabled(other_key) is True
+    assert other_key in runner._session_model_overrides
+    assert other_key in runner._session_reasoning_overrides
+    assert other_key in runner._pending_model_notes
     assert other_key in runner._pending_approvals
     assert other_key in runner._update_prompt_pending
     assert other_key in runner._pending_skills_reload_notes
@@ -221,7 +257,7 @@ async def test_branch_preserves_persisted_assistant_metadata():
 
 
 def test_clear_session_boundary_security_state_is_scoped():
-    """The helper must wipe only the target session's approval/yolo state.
+    """The helper must wipe only the target session's boundary state.
 
     Also exercises the /new reset path indirectly: /new calls this helper,
     so if the helper is scoped correctly, /new's clearing is correct too.
@@ -229,6 +265,9 @@ def test_clear_session_boundary_security_state_is_scoped():
     from gateway.run import GatewayRunner
 
     runner = object.__new__(GatewayRunner)
+    runner._session_model_overrides = {}
+    runner._session_reasoning_overrides = {}
+    runner._pending_model_notes = {}
     runner._pending_approvals = {}
     runner._update_prompt_pending = {}
     runner._pending_skills_reload_notes = {}
@@ -241,6 +280,26 @@ def test_clear_session_boundary_security_state_is_scoped():
     approve_session(other_key, "recursive delete")
     enable_session_yolo(session_key)
     enable_session_yolo(other_key)
+    runner._session_model_overrides[session_key] = {
+        "model": "gpt-5.4",
+        "provider": "openai",
+    }
+    runner._session_model_overrides[other_key] = {
+        "model": "claude-sonnet-4-6",
+        "provider": "anthropic",
+    }
+    runner._session_reasoning_overrides[session_key] = {
+        "enabled": True,
+        "effort": "high",
+    }
+    runner._session_reasoning_overrides[other_key] = {
+        "enabled": True,
+        "effort": "low",
+    }
+    runner._pending_model_notes[session_key] = "[Note: switched to gpt-5.4.]"
+    runner._pending_model_notes[other_key] = (
+        "[Note: switched to claude-sonnet-4-6.]"
+    )
     runner._pending_approvals[session_key] = {"command": "rm -rf /tmp/demo"}
     runner._pending_approvals[other_key] = {"command": "rm -rf /tmp/other"}
     runner._update_prompt_pending[session_key] = True
@@ -266,6 +325,9 @@ def test_clear_session_boundary_security_state_is_scoped():
     # Target session cleared
     assert is_approved(session_key, "recursive delete") is False
     assert is_session_yolo_enabled(session_key) is False
+    assert session_key not in runner._session_model_overrides
+    assert session_key not in runner._session_reasoning_overrides
+    assert session_key not in runner._pending_model_notes
     assert session_key not in runner._pending_approvals
     assert session_key not in runner._update_prompt_pending
     assert session_key not in runner._pending_skills_reload_notes
@@ -273,6 +335,9 @@ def test_clear_session_boundary_security_state_is_scoped():
     # Other session untouched
     assert is_approved(other_key, "recursive delete") is True
     assert is_session_yolo_enabled(other_key) is True
+    assert other_key in runner._session_model_overrides
+    assert other_key in runner._session_reasoning_overrides
+    assert other_key in runner._pending_model_notes
     assert other_key in runner._pending_approvals
     assert other_key in runner._update_prompt_pending
     assert other_key in runner._pending_skills_reload_notes

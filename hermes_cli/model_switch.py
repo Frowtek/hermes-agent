@@ -279,6 +279,25 @@ class ModelSwitchResult:
     is_global: bool = False
 
 
+def apply_model_switch_to_config(config: dict, result: ModelSwitchResult) -> dict:
+    """Mutate ``config`` with the persisted fields from a global /model switch."""
+    if not isinstance(config, dict):
+        config = {}
+
+    model_cfg = config.get("model")
+    if not isinstance(model_cfg, dict):
+        model_cfg = {}
+        config["model"] = model_cfg
+
+    model_cfg["default"] = result.new_model
+    model_cfg["provider"] = result.target_provider
+    if result.base_url:
+        model_cfg["base_url"] = result.base_url
+    else:
+        model_cfg.pop("base_url", None)
+    return config
+
+
 @dataclass
 class CustomAutoResult:
     """Result of switching to bare 'custom' provider with auto-detect."""

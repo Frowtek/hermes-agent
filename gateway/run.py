@@ -10436,11 +10436,8 @@ class GatewayRunner:
                         cfg = yaml.safe_load(f) or {}
                 else:
                     cfg = {}
-                model_cfg = cfg.setdefault("model", {})
-                model_cfg["default"] = result.new_model
-                model_cfg["provider"] = result.target_provider
-                if result.base_url:
-                    model_cfg["base_url"] = result.base_url
+                from hermes_cli.model_switch import apply_model_switch_to_config
+                apply_model_switch_to_config(cfg, result)
                 from hermes_cli.config import save_config
                 save_config(cfg)
             except Exception as e:

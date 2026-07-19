@@ -104,13 +104,22 @@ class _ThreadRoutingStream:
         return getattr(self._target(), name)
 
 
-def _ensure_installed(attr: str, sink: TextIO) -> "_ThreadRoutingStream":
-    """Install (idempotently) a routing proxy as ``sys.<attr>`` and return it."""
+def _ensure_installed(attr: str) -> "_ThreadRoutingStream":
+    """Install (idempotently) a routing proxy as ``sys.<attr>`` and return it.
+
+    The proxy opens and OWNS its devnull sink for the lifetime of the process.
+    That ownership is forced by the install contract above: the proxy stays
+    bound to ``sys.<attr>`` after every ``thread_scoped_silence()`` block
+    exits, so the sink it routes silenced threads to has to outlive them all.
+    A sink owned by one block would be closed while the proxy still points at
+    it, leaving every later silenced thread writing into a closed file.
+    """
     with _install_lock:
         proxy = _installed.get(attr)
         current = getattr(sys, attr, None)
         if proxy is not None and current is proxy:
             return proxy
+        sink = open(os.devnull, "w", encoding="utf-8")
         # Capture whatever is currently bound as the passthrough.  If a prior
         # global redirect_stdout is active we deliberately route non-silenced
         # threads to *that* (matching prior behaviour) rather than guessing at
@@ -130,10 +139,9 @@ def thread_scoped_silence() -> Iterator[None]:
     thread's body instead of ``contextlib.redirect_stdout(devnull)`` when the
     process is multi-threaded and another thread must keep its console output.
     """
-    sink = open(os.devnull, "w", encoding="utf-8")
     ident = threading.get_ident()
-    out_proxy = _ensure_installed("stdout", sink)
-    err_proxy = _ensure_installed("stderr", sink)
+    out_proxy = _ensure_installed("stdout")
+    err_proxy = _ensure_installed("stderr")
     out_proxy.silence(ident)
     err_proxy.silence(ident)
     try:
@@ -141,7 +149,3 @@ def thread_scoped_silence() -> Iterator[None]:
     finally:
         out_proxy.unsilence(ident)
         err_proxy.unsilence(ident)
-        try:
-            sink.close()
-        except Exception:
-            pass

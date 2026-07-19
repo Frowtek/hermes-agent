@@ -12,6 +12,8 @@ import sys
 import threading
 import time
 
+import pytest
+
 from agent.thread_scoped_output import thread_scoped_silence
 
 
@@ -147,3 +149,110 @@ def test_many_concurrent_silenced_and_loud_threads():
     for i in range(5):
         assert f"S{i}" not in captured, f"silenced S{i} leaked"
         assert f"L{i}" in captured, f"loud L{i} swallowed"
+
+
+# ---------------------------------------------------------------------------
+# Sink lifetime
+# ---------------------------------------------------------------------------
+#
+# The routing proxy is installed once and deliberately never uninstalled, so it
+# stays bound to sys.stdout/sys.stderr after a block exits. The devnull sink it
+# routes silenced threads to therefore has to outlive every block. When each
+# block owned (and closed) the sink, the first block left the still-installed
+# proxy pointing at a CLOSED file: from the second block onward every silenced
+# thread wrote into it. write()/flush() swallow the resulting ValueError, but
+# fileno() does not — and subprocess spawning with ``stdout=sys.stdout`` (as
+# tools/mcp_stdio_watchdog.py does) calls exactly that. background_review.py
+# opens two such blocks, so a real run hits this on its second silencing.
+
+
+@pytest.fixture()
+def installed_registry():
+    """Isolate the module's install state.
+
+    Reads the registry out of ``thread_scoped_silence.__globals__`` rather than
+    re-importing: another test in the suite reloads this module, which would
+    otherwise hand the fixture a *different* module object than the function
+    under test writes into. ``_ensure_installed`` also reinstalls whenever
+    ``sys.stdout`` is no longer the proxy it put there, so pytest's capture
+    would leak across these assertions without the rebind below.
+    """
+    # ``@contextlib.contextmanager`` wraps the function, so reach the original
+    # via __wrapped__ to land in the defining module's namespace.
+    _fn = getattr(thread_scoped_silence, "__wrapped__", thread_scoped_silence)
+    registry = _fn.__globals__["_installed"]
+
+    saved_out, saved_err = sys.stdout, sys.stderr
+    saved_installed = dict(registry)
+    registry.clear()
+    sys.stdout = io.StringIO()
+    sys.stderr = io.StringIO()
+    try:
+        yield registry
+    finally:
+        registry.clear()
+        registry.update(saved_installed)
+        sys.stdout, sys.stderr = saved_out, saved_err
+
+
+def test_sink_survives_the_first_block(installed_registry):
+    with thread_scoped_silence():
+        pass
+
+    proxy = installed_registry["stdout"]
+
+    assert not proxy._sink.closed, (
+        "the installed proxy outlives the block, so its sink must too"
+    )
+
+
+def test_second_silenced_block_can_still_use_fileno(installed_registry):
+    """subprocess(stdout=sys.stdout) inside a silenced thread must not blow up."""
+    with thread_scoped_silence():
+        pass
+
+    captured = {}
+
+    def worker():
+        try:
+            with thread_scoped_silence():
+                captured["fd"] = sys.stdout.fileno()
+        except Exception as exc:  # noqa: BLE001 — recorded for the assertion
+            captured["error"] = f"{type(exc).__name__}: {exc}"
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    assert "error" not in captured, captured.get("error")
+    assert isinstance(captured.get("fd"), int)
+
+
+def test_repeated_blocks_reuse_one_sink(installed_registry):
+    """The sink is process-scoped; a per-call sink was also a per-call fd."""
+    with thread_scoped_silence():
+        pass
+
+    first = installed_registry["stdout"]._sink
+
+    for _ in range(5):
+        with thread_scoped_silence():
+            pass
+
+    assert installed_registry["stdout"]._sink is first
+    assert not first.closed
+
+
+def test_silencing_still_works_after_many_blocks():
+    """The lifetime fix must not weaken the actual silencing contract."""
+    for _ in range(3):
+        with thread_scoped_silence():
+            pass
+
+    def worker():
+        with thread_scoped_silence():
+            print("SILENCED-LATE-BLOCK")
+
+    reached = _run_with_real_stream(worker)
+
+    assert "SILENCED-LATE-BLOCK" not in reached

@@ -616,10 +616,7 @@ class TestProbeCapabilityGating:
             initialize_result = outer._InitResult(caps)
 
             def __init__(self_inner):
-                # The probe now drains list_* pagination under the server's
-                # _rpc_lock (parity with the tool discovery path); the lock is
-                # created here on the MCP loop thread so it binds to that loop.
-                self_inner._rpc_lock = asyncio.Lock()
+                self_inner._rpc_lock = asyncio.Lock()  # the probe drains list_* under it
 
             async def shutdown(self_inner):
                 return None
@@ -678,16 +675,8 @@ class TestProbeCapabilityGating:
         return _FakeServer()
 
     def test_probe_counts_drain_pagination(self, monkeypatch):
-        """Prompt/resource counts must follow ``nextCursor`` so a paginated
-        server is not undercounted at page 1.
-
-        The tool count in the same probe already comes from the paginated
-        discovery (``server._tools``), so leaving prompts/resources on page 1
-        reported an inconsistent, understated capability count for any server
-        that paginates ``prompts/list`` / ``resources/list``. Mirrors the
-        nextCursor draining applied to the tools/resources/prompts discovery
-        sites in ``tools/mcp_tool.py``.
-        """
+        """Prompt/resource counts follow ``nextCursor`` like discovery does (the tool count
+        in the same probe is already paginated), so a paginated server is not undercounted."""
         import hermes_cli.mcp_config as mc
 
         caps = self._Caps(prompts=object(), resources=object())
@@ -706,7 +695,7 @@ class TestProbeCapabilityGating:
         async def _fake_connect(name, cfg):
             return server
 
-        monkeypatch.setattr("tools.mcp_tool._connect_server", _fake_connect)
+        monkeypatch.setattr("tools.mcp_tool_discovery._connect_server", _fake_connect)
         details: dict = {}
         mc._probe_single_server("srv", {"url": "http://x/mcp"}, details=details)
 
